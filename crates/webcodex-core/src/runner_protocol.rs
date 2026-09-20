@@ -3618,8 +3618,6 @@ mod envelope_tests {
                 status: "running".to_string(),
                 stdout_chunk: Some("out".to_string()),
                 stderr_chunk: None,
-                stdout_tail: None,
-                stderr_tail: None,
                 log_snapshot: None,
                 exit_code: None,
                 duration_ms: None,
@@ -3633,10 +3631,43 @@ mod envelope_tests {
         };
         let json = job_env.to_json().unwrap();
         assert!(json.contains(r#""type":"job_update""#));
+        assert!(!json.contains("\"stdout_tail\""));
+        assert!(!json.contains("\"stderr_tail\""));
         match RunnerEnvelope::from_slice(json.as_bytes()).unwrap() {
             RunnerEnvelope::JobUpdate { payload } => assert_eq!(payload.job_id, "job-1"),
             other => panic!("expected job_update, got {:?}", other.kind()),
         }
+    }
+
+    #[test]
+    fn job_update_accepts_retired_null_tail_fields_for_v04_rolling_compat() {
+        let legacy = serde_json::json!({
+            "type": "job_update",
+            "client_id": "ws-1",
+            "agent_instance_id": "11111111-1111-1111-1111-111111111111",
+            "job_id": "job-v04",
+            "request_id": "req-v04",
+            "status": "running",
+            "stdout_chunk": null,
+            "stderr_chunk": null,
+            "stdout_tail": null,
+            "stderr_tail": null,
+            "finished": false
+        });
+        let bytes = serde_json::to_vec(&legacy).unwrap();
+        let decoded = RunnerEnvelope::from_slice(&bytes).unwrap();
+        match &decoded {
+            RunnerEnvelope::JobUpdate { payload } => {
+                assert_eq!(payload.job_id, "job-v04");
+                assert!(payload.stdout_chunk.is_none());
+                assert!(payload.stderr_chunk.is_none());
+            }
+            other => panic!("expected job_update, got {:?}", other.kind()),
+        }
+
+        let reencoded = decoded.to_json().unwrap();
+        assert!(!reencoded.contains("\"stdout_tail\""));
+        assert!(!reencoded.contains("\"stderr_tail\""));
     }
 
     #[test]
@@ -3984,8 +4015,6 @@ mod envelope_tests {
             status: "running".to_string(),
             stdout_chunk: None,
             stderr_chunk: None,
-            stdout_tail: None,
-            stderr_tail: None,
             log_snapshot: None,
             exit_code: None,
             duration_ms: None,
