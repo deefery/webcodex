@@ -26,10 +26,10 @@ pub fn parse_skill_metadata(text: &str) -> Result<SkillMetadata, &'static str> {
         return Err("skill_definition_too_large");
     }
     let frontmatter = extract_frontmatter(text)?;
-    let parsed = serde_norway::from_str::<SkillFrontmatter>(&frontmatter)
-        .ok()
-        .or_else(|| parse_legacy_frontmatter(&frontmatter).ok())
-        .ok_or("skill_frontmatter_scalar_invalid")?;
+    let parsed = match serde_norway::from_str::<SkillFrontmatter>(&frontmatter) {
+        Ok(parsed) => parsed,
+        Err(_) => parse_legacy_frontmatter(&frontmatter)?,
+    };
     let name = parsed.name.ok_or("skill_name_missing")?;
     let description = parsed.description.ok_or("skill_description_missing")?;
     if name.is_empty()
@@ -59,7 +59,7 @@ fn extract_frontmatter(text: &str) -> Result<String, &'static str> {
     }
     let mut frontmatter = String::new();
     for line in lines.take(MAX_SKILL_FRONTMATTER_LINES) {
-        if line.trim() == "---" {
+        if line.trim_end() == "---" {
             return Ok(frontmatter);
         }
         frontmatter.push_str(line);
@@ -144,6 +144,16 @@ mod tests {
     }
 
     #[test]
+    fn parser_preserves_legacy_duplicate_field_error() {
+        assert_eq!(
+            parse_skill_metadata(
+                "---\nname: demo\nname: duplicate\ndescription: duplicate names are invalid\n---",
+            ),
+            Err("skill_frontmatter_duplicate_field")
+        );
+    }
+
+    #[test]
     fn parser_accepts_yaml_block_string_scalars() {
         let folded = parse_skill_metadata(
             "---\nname: demo\ndescription: >\n  Build useful tools with\n  reusable primitives.\n---",
@@ -168,6 +178,15 @@ mod tests {
         )
         .unwrap();
         assert_eq!(literal.description, "First line.\nSecond line.\n");
+    }
+
+    #[test]
+    fn parser_keeps_indented_document_marker_inside_block_scalar() {
+        let parsed = parse_skill_metadata(
+            "---\nname: demo\ndescription: |\n  First line.\n  ---\n  Last line.\n---",
+        )
+        .unwrap();
+        assert_eq!(parsed.description, "First line.\n---\nLast line.\n");
     }
 
     #[test]
